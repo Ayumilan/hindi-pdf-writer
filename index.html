@@ -400,8 +400,6 @@
 <!-- ═══════════════════════════════════════════════════
      PyScript Python block
 ═══════════════════════════════════════════════════ -->
-<script type="py" src="main.py" config='{"packages":["pypdf","reportlab"]}'></script>
-
 <script>
 // ── State ──
 let selectedColor = 'blue';
@@ -525,13 +523,8 @@ async function processPDF() {
   // Small delay to let DOM update
   await new Promise(r => setTimeout(r, 50));
 
-  try {
-    // Call Python function (defined in main.py)
-    await pyscript.interpreter.runPythonAsync('process_from_js()');
-  } catch(e) {
-    setStatus('error', '❌ Error: ' + e.message);
-    document.getElementById('process-btn').disabled = false;
-  }
+  // Trigger via custom event — Python listens and calls back
+  window.dispatchEvent(new CustomEvent('run-python-pdf'));
 }
 
 // Called by Python when done
@@ -548,87 +541,65 @@ function onPythonError(msg) {
 }
 </script>
 
-<!-- ═══════════════════════════════════════
-     Inline Python (fallback if main.py missing)
-═══════════════════════════════════════ -->
-<script type="py">
+<!-- Python runs entirely inline via PyScript -->
+<script type="py" config='{"packages":["pypdf","reportlab"]}'>
 import js
 import io
-import sys
-
-# Hide loading overlay once PyScript is ready
-def hide_loader():
-    el = js.document.getElementById('py-loading')
-    el.classList.add('hidden')
-
-# Download font bytes via fetch (browser)
-async def fetch_font():
-    url = "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Regular.ttf"
-    response = await js.fetch(url)
-    buf = await response.arrayBuffer()
-    arr = js.Uint8Array.new(buf)
-    return bytes(arr.to_py())
+from pyodide.ffi import create_proxy
 
 _font_bytes = None
 
-async def ensure_font_bytes():
-    global _font_bytes
-    if _font_bytes is not None:
-        return _font_bytes
-    try:
-        _font_bytes = await fetch_font()
-    except Exception as e:
-        raise RuntimeError(f"Could not load Devanagari font: {e}")
-    return _font_bytes
+async def fetch_font():
+    # Use jsDelivr CDN — reliable CORS headers, works from browser
+    url = "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Regular.ttf"
+    response = await js.fetch(url)
+    buf = await response.arrayBuffer()
+    return bytes(js.Uint8Array.new(buf).to_py())
 
-async def process_from_js():
+async def ensure_font():
+    global _font_bytes
+    if _font_bytes is None:
+        _font_bytes = await fetch_font()
+    font_tmp = "/tmp/NotoSansDevanagari-Regular.ttf"
+    with open(font_tmp, "wb") as f:
+        f.write(_font_bytes)
+    return font_tmp
+
+async def run(_event=None):
     try:
         from pypdf import PdfReader, PdfWriter
         from reportlab.pdfgen import canvas as rl_canvas
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
 
-        pdf_bytes   = bytes(js.window._pdfInput.to_py())
-        hindi_text  = str(js.window._hindiText)
-        font_size   = int(js.window._fontSize)
-        position    = str(js.window._position)
-        color_list  = js.window._colorRGB.to_py()
-        color_rgb   = tuple(color_list)
+        pdf_bytes  = bytes(js.window._pdfInput.to_py())
+        hindi_text = str(js.window._hindiText)
+        font_size  = int(js.window._fontSize)
+        position   = str(js.window._position)
+        color_rgb  = tuple(js.window._colorRGB.to_py())
 
-        # Load font
-        font_bytes = await ensure_font_bytes()
-
-        # Register font from bytes
-        import tempfile, os
-        font_tmp = "/tmp/NotoSansDevanagari-Regular.ttf"
-        with open(font_tmp, "wb") as f:
-            f.write(font_bytes)
-
+        font_path = await ensure_font()
         try:
-            pdfmetrics.registerFont(TTFont("NotoSansDevanagari", font_tmp))
+            pdfmetrics.registerFont(TTFont("NotoSansDevanagari", font_path))
         except Exception:
             pass  # already registered
 
-        # Read PDF
         reader = PdfReader(io.BytesIO(pdf_bytes))
-        page = reader.pages[0]
-        pw = float(page.mediabox.width)
-        ph = float(page.mediabox.height)
+        page   = reader.pages[0]
+        pw     = float(page.mediabox.width)
+        ph     = float(page.mediabox.height)
 
-        # Estimate text width
-        est_w = len(hindi_text) * font_size * 0.65
         margin = 50
-
+        est_w  = len(hindi_text) * font_size * 0.65
         pos_map = {
-            "1": (margin, ph - margin),
-            "2": (pw/2 - est_w/2, ph - margin),
+            "1": (margin,            ph - margin),
+            "2": (pw/2 - est_w/2,   ph - margin),
             "3": (pw - est_w - margin, ph - margin),
-            "4": (pw/2 - est_w/2, ph/2),
-            "5": (margin, margin + font_size),
+            "4": (pw/2 - est_w/2,   ph/2),
+            "5": (margin,            margin + font_size),
         }
         x, y = pos_map.get(position, (margin, ph - margin))
 
-        # Build overlay
         packet = io.BytesIO()
         c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
         c.setFont("NotoSansDevanagari", font_size)
@@ -637,9 +608,7 @@ async def process_from_js():
         c.save()
         packet.seek(0)
 
-        # Merge
-        overlay_reader = PdfReader(packet)
-        overlay_page = overlay_reader.pages[0]
+        overlay_page = PdfReader(packet).pages[0]
         page.merge_page(overlay_page)
 
         writer = PdfWriter()
@@ -649,14 +618,17 @@ async def process_from_js():
 
         out = io.BytesIO()
         writer.write(out)
-        result = list(out.getvalue())
-
-        js.onPythonDone(result)
+        js.onPythonDone(list(out.getvalue()))
 
     except Exception as e:
-        js.onPythonError(str(e))
+        import traceback
+        js.onPythonError(traceback.format_exc())
 
-hide_loader()
+# Listen for JS trigger event
+js.window.addEventListener("run-python-pdf", create_proxy(lambda e: run(e)))
+
+# PyScript ready — hide loader
+js.document.getElementById("py-loading").classList.add("hidden")
 </script>
 
 </body>
