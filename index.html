@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Hindi PDF Writer · हिंदी PDF लेखक</title>
+<link href="https://fonts.googleapis.com/css2?family=Tiro+Devanagari+Hindi:ital@0;1&family=DM+Mono:wght@400;500&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet"/>
+
+<!-- PyScript -->
+<link rel="stylesheet" href="https://pyscript.net/releases/2024.11.1/core.css"/>
+<script type="module" src="https://pyscript.net/releases/2024.11.1/core.js"></script>
+
+<style>
+  :root {
+    --saffron: #FF6B00;
+    --saffron-light: #FF8C38;
+    --ink: #0D0D0D;
+    --paper: #FAF6F0;
+    --paper-dark: #F0E8DC;
+    --green: #138808;
+    --ash: #888;
+    --card: #FFFCF7;
+    --border: #E8DDD0;
+    --shadow: 0 4px 24px rgba(255,107,0,0.10);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'DM Mono', monospace;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Decorative background */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 10% 0%, rgba(255,107,0,0.08) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 80% at 90% 100%, rgba(19,136,8,0.06) 0%, transparent 60%);
+    pointer-events: none; z-index: 0;
+  }
+
+  /* Ashoka wheel watermark */
+  body::after {
+    content: '☸';
+    position: fixed;
+    right: -40px; bottom: -40px;
+    font-size: 320px;
+    color: rgba(255,107,0,0.04);
+    pointer-events: none; z-index: 0;
+    line-height: 1;
+  }
+
+  .wrap {
+    position: relative; z-index: 1;
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  /* Header */
+  header {
+    text-align: center;
+    margin-bottom: 52px;
+  }
+
+  .flag-stripe {
+    display: flex; gap: 0;
+    height: 5px;
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 28px;
+    width: 80px;
+    margin-left: auto; margin-right: auto;
+  }
+  .flag-stripe span { flex: 1; }
+  .flag-stripe .s1 { background: var(--saffron); }
+  .flag-stripe .s2 { background: #fff; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; }
+  .flag-stripe .s3 { background: var(--green); }
+
+  h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(2rem, 6vw, 3rem);
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    color: var(--ink);
+  }
+  h1 em {
+    font-style: normal;
+    color: var(--saffron);
+  }
+
+  .sub {
+    font-family: 'Tiro Devanagari Hindi', serif;
+    font-size: 1.1rem;
+    color: var(--ash);
+    margin-top: 8px;
+  }
+
+  /* Card */
+  .card {
+    background: var(--card);
+    border: 1.5px solid var(--border);
+    border-radius: 20px;
+    padding: 36px 32px;
+    box-shadow: var(--shadow);
+    margin-bottom: 20px;
+  }
+
+  /* Section label */
+  .section-label {
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--saffron);
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Drop zone */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 14px;
+    padding: 36px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--paper);
+    position: relative;
+    margin-bottom: 24px;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--saffron);
+    background: rgba(255,107,0,0.04);
+  }
+  .drop-zone input[type=file] {
+    position: absolute; inset: 0;
+    opacity: 0; cursor: pointer; width: 100%;
+  }
+  .dz-icon { font-size: 2.5rem; margin-bottom: 10px; display: block; }
+  .dz-text { font-size: 0.9rem; color: var(--ash); }
+  .dz-text strong { color: var(--saffron); }
+  .dz-file-name {
+    margin-top: 10px;
+    font-size: 0.85rem;
+    color: var(--green);
+    font-weight: 500;
+    display: none;
+  }
+
+  /* Form fields */
+  .field { margin-bottom: 20px; }
+  label {
+    display: block;
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    color: var(--ash);
+    margin-bottom: 7px;
+    text-transform: uppercase;
+  }
+  input[type=text], input[type=number], select {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--paper);
+    font-family: 'DM Mono', monospace;
+    font-size: 1rem;
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.18s;
+    appearance: none;
+  }
+  input:focus, select:focus { border-color: var(--saffron); }
+
+  .preview-hindi {
+    margin-top: 8px;
+    font-family: 'Tiro Devanagari Hindi', serif;
+    font-size: 1.5rem;
+    color: var(--ink);
+    min-height: 2rem;
+    padding: 6px 0;
+    letter-spacing: 0.02em;
+  }
+
+  /* Grid 2-col */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* Color swatches */
+  .color-swatches {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .swatch {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 2.5px solid transparent;
+    cursor: pointer;
+    transition: transform 0.15s, border-color 0.15s;
+  }
+  .swatch:hover { transform: scale(1.1); }
+  .swatch.active { border-color: var(--ink); transform: scale(1.12); }
+  .swatch-label { font-size: 0.75rem; color: var(--ash); align-self: center; }
+
+  /* Button */
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%;
+    padding: 16px;
+    background: var(--saffron);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-family: 'DM Mono', monospace;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.18s, transform 0.1s, box-shadow 0.18s;
+    box-shadow: 0 4px 16px rgba(255,107,0,0.25);
+    letter-spacing: 0.02em;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--saffron-light);
+    box-shadow: 0 6px 20px rgba(255,107,0,0.35);
+    transform: translateY(-1px);
+  }
+  .btn:active:not(:disabled) { transform: translateY(0); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* Status */
+  #status {
+    margin-top: 16px;
+    padding: 13px 18px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    display: none;
+  }
+  #status.loading { background: #FFF8F0; border: 1.5px solid #FFD5A8; color: #B85000; display: block; }
+  #status.success { background: #F0FBF0; border: 1.5px solid #A8DDA8; color: #0A600A; display: block; }
+  #status.error   { background: #FFF0F0; border: 1.5px solid #FFB0B0; color: #900; display: block; }
+
+  /* Loading spinner inline */
+  .spin {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Download button */
+  #download-btn {
+    display: none;
+    margin-top: 14px;
+    background: var(--green);
+    box-shadow: 0 4px 16px rgba(19,136,8,0.2);
+  }
+  #download-btn:hover:not(:disabled) {
+    background: #1aaa0a;
+    box-shadow: 0 6px 20px rgba(19,136,8,0.3);
+  }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    font-size: 0.75rem;
+    color: #bbb;
+    margin-top: 48px;
+  }
+  footer a { color: var(--saffron); text-decoration: none; }
+
+  /* Responsive */
+  @media (max-width: 500px) {
+    .card { padding: 24px 18px; }
+    .grid2 { grid-template-columns: 1fr; }
+  }
+
+  /* PyScript loading overlay */
+  #py-loading {
+    position: fixed; inset: 0;
+    background: var(--paper);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px; z-index: 999;
+    transition: opacity 0.4s;
+  }
+  #py-loading.hidden { opacity: 0; pointer-events: none; }
+  #py-loading .py-icon { font-size: 3rem; animation: bounce 1s ease-in-out infinite alternate; }
+  @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-12px); } }
+  #py-loading p { font-size: 0.85rem; color: var(--ash); }
+</style>
+</head>
+<body>
+
+<!-- Loading screen while PyScript boots -->
+<div id="py-loading">
+  <div class="py-icon">📄</div>
+  <p>Loading Python engine… <span class="spin"></span></p>
+  <p style="font-size:0.75rem;color:#ccc;">First load may take ~10 seconds</p>
+</div>
+
+<div class="wrap">
+  <header>
+    <div class="flag-stripe">
+      <span class="s1"></span><span class="s2"></span><span class="s3"></span>
+    </div>
+    <h1>Hindi <em>PDF</em><br>Writer</h1>
+    <p class="sub">हिंदी PDF लेखक</p>
+  </header>
+
+  <!-- Upload -->
+  <div class="card">
+    <div class="section-label">01 &nbsp;Upload PDF</div>
+    <div class="drop-zone" id="drop-zone">
+      <input type="file" id="pdf-input" accept=".pdf"/>
+      <span class="dz-icon">📂</span>
+      <p class="dz-text"><strong>Click to choose</strong> or drag & drop</p>
+      <p class="dz-text" style="font-size:0.78rem;margin-top:4px;">PDF files only</p>
+      <p class="dz-file-name" id="file-name"></p>
+    </div>
+
+    <div class="section-label">02 &nbsp;Your Name</div>
+    <div class="field">
+      <label>Type in English or paste Hindi (हिंदी)</label>
+      <input type="text" id="name-input" placeholder="e.g. Rahul or राहुल" oninput="previewHindi(this.value)"/>
+      <div class="preview-hindi" id="hindi-preview">—</div>
+    </div>
+  </div>
+
+  <!-- Options -->
+  <div class="card">
+    <div class="section-label">03 &nbsp;Style Options</div>
+
+    <div class="grid2">
+      <div class="field">
+        <label>Font size (pt)</label>
+        <input type="number" id="font-size" value="28" min="8" max="120"/>
+      </div>
+      <div class="field">
+        <label>Position on page</label>
+        <select id="position">
+          <option value="1">Top-Left</option>
+          <option value="2">Top-Center</option>
+          <option value="3">Top-Right</option>
+          <option value="4">Center</option>
+          <option value="5">Bottom-Left</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Text color</label>
+      <div class="color-swatches">
+        <div class="swatch active" style="background:#1a1aCC" data-color="blue" title="Blue" onclick="selectColor(this)"></div>
+        <div class="swatch" style="background:#0D0D0D" data-color="black" title="Black" onclick="selectColor(this)"></div>
+        <div class="swatch" style="background:#CC1A1A" data-color="red" title="Red" onclick="selectColor(this)"></div>
+        <div class="swatch" style="background:#138808" data-color="green" title="Green" onclick="selectColor(this)"></div>
+        <div class="swatch" style="background:#FF6B00" data-color="saffron" title="Saffron" onclick="selectColor(this)"></div>
+        <span class="swatch-label">← pick a color</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action -->
+  <div class="card">
+    <div class="section-label">04 &nbsp;Generate</div>
+    <button class="btn" id="process-btn" onclick="processPDF()" disabled>
+      ✍️ &nbsp;Write Hindi on PDF
+    </button>
+    <div id="status"></div>
+    <button class="btn" id="download-btn" onclick="downloadResult()">
+      ⬇️ &nbsp;Download PDF
+    </button>
+  </div>
+
+  <footer>
+    Runs entirely in your browser · No files uploaded to any server<br/>
+    <a href="https://github.com/googlefonts/noto-fonts" target="_blank">Noto Devanagari font</a>
+    &nbsp;·&nbsp;
+    <a href="https://pyscript.net" target="_blank">PyScript</a>
+  </footer>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     PyScript Python block
+═══════════════════════════════════════════════════ -->
+<script type="py" src="main.py" config='{"packages":["pypdf","reportlab"]}'></script>
+
+<script>
+// ── State ──
+let selectedColor = 'blue';
+let pdfBytes = null;      // original PDF ArrayBuffer
+let resultBytes = null;   // processed PDF bytes
+
+// ── Hindi name dictionary ──
+const HINDI_NAMES = {
+  rahul:'राहुल',priya:'प्रिया',amit:'अमित',neha:'नेहा',vijay:'विजय',
+  sunita:'सुनीता',rajesh:'राजेश',pooja:'पूजा',suresh:'सुरेश',kavita:'कविता',
+  anil:'अनिल',rekha:'रेखा',deepak:'दीपक',geeta:'गीता',sanjay:'संजय',
+  asha:'आशा',manoj:'मनोज',anita:'अनीता',ravi:'रवि',meena:'मीना',
+  kumar:'कुमार',lata:'लता',mohan:'मोहन',usha:'उषा',arjun:'अर्जुन',
+  divya:'दिव्या',vikram:'विक्रम',shweta:'श्वेता',rohit:'रोहित',anjali:'अंजलि',
+  aakash:'आकाश',shruti:'श्रुति',gaurav:'गौरव',pallavi:'पल्लवी',vivek:'विवेक',
+  swati:'स्वाति',shyam:'श्याम',radha:'राधा',krishna:'कृष्ण',lakshmi:'लक्ष्मी',
+  pankaj:'पंकज',mamta:'ममता',hemant:'हेमंत',rani:'रानी',rajan:'राजन',
+  seema:'सीमा',vinod:'विनोद',meera:'मीरा',ashok:'अशोक',savita:'सविता',
+  girish:'गिरीश',sharad:'शरद',nisha:'निशा',dinesh:'दिनेश',sudha:'सुधा',
+};
+
+function isDevanagari(str) {
+  return /[\u0900-\u097F]/.test(str);
+}
+
+function previewHindi(val) {
+  const prev = document.getElementById('hindi-preview');
+  if (!val.trim()) { prev.textContent = '—'; return; }
+  if (isDevanagari(val)) { prev.textContent = val; return; }
+  const mapped = HINDI_NAMES[val.trim().toLowerCase()];
+  prev.textContent = mapped || val;
+}
+
+function selectColor(el) {
+  document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+  el.classList.add('active');
+  selectedColor = el.dataset.color;
+}
+
+// ── File input ──
+document.getElementById('pdf-input').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const fn = document.getElementById('file-name');
+  fn.textContent = '✓ ' + file.name;
+  fn.style.display = 'block';
+  const reader = new FileReader();
+  reader.onload = ev => {
+    pdfBytes = ev.target.result;
+    checkReady();
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+// Drag & drop
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (!file || !file.name.endsWith('.pdf')) return;
+  document.getElementById('pdf-input').files = e.dataTransfer.files;
+  document.getElementById('file-name').textContent = '✓ ' + file.name;
+  document.getElementById('file-name').style.display = 'block';
+  const reader = new FileReader();
+  reader.onload = ev => { pdfBytes = ev.target.result; checkReady(); };
+  reader.readAsArrayBuffer(file);
+});
+
+function checkReady() {
+  const name = document.getElementById('name-input').value.trim();
+  document.getElementById('process-btn').disabled = !(pdfBytes && name);
+}
+document.getElementById('name-input').addEventListener('input', checkReady);
+
+function setStatus(type, msg) {
+  const el = document.getElementById('status');
+  el.className = type;
+  el.innerHTML = msg;
+}
+
+function downloadResult() {
+  if (!resultBytes) return;
+  const blob = new Blob([resultBytes], {type: 'application/pdf'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'output_hindi.pdf';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function processPDF() {
+  const nameInput = document.getElementById('name-input').value.trim();
+  if (!nameInput || !pdfBytes) return;
+
+  // Resolve Hindi text
+  let hindiText = nameInput;
+  if (!isDevanagari(nameInput)) {
+    const mapped = HINDI_NAMES[nameInput.toLowerCase()];
+    hindiText = mapped || nameInput;
+  }
+
+  const fontSize   = parseInt(document.getElementById('font-size').value) || 28;
+  const position   = document.getElementById('position').value;
+  const colorMap   = { blue:[0.1,0.1,0.8], black:[0,0,0], red:[0.8,0.1,0.1], green:[0.07,0.53,0.03], saffron:[1,0.42,0] };
+  const colorRGB   = colorMap[selectedColor] || colorMap.blue;
+
+  setStatus('loading', '<span class="spin"></span> &nbsp;Processing PDF…');
+  document.getElementById('process-btn').disabled = true;
+  document.getElementById('download-btn').style.display = 'none';
+
+  // Pass data to Python via globals
+  const uint8 = new Uint8Array(pdfBytes);
+  window._pdfInput    = Array.from(uint8);
+  window._hindiText   = hindiText;
+  window._fontSize    = fontSize;
+  window._position    = position;
+  window._colorRGB    = colorRGB;
+
+  // Small delay to let DOM update
+  await new Promise(r => setTimeout(r, 50));
+
+  try {
+    // Call Python function (defined in main.py)
+    await pyscript.interpreter.runPythonAsync('process_from_js()');
+  } catch(e) {
+    setStatus('error', '❌ Error: ' + e.message);
+    document.getElementById('process-btn').disabled = false;
+  }
+}
+
+// Called by Python when done
+function onPythonDone(resultArray) {
+  resultBytes = new Uint8Array(resultArray);
+  setStatus('success', '✅ Done! Click Download to save your PDF.');
+  document.getElementById('download-btn').style.display = 'flex';
+  document.getElementById('process-btn').disabled = false;
+}
+
+function onPythonError(msg) {
+  setStatus('error', '❌ ' + msg);
+  document.getElementById('process-btn').disabled = false;
+}
+</script>
+
+<!-- ═══════════════════════════════════════
+     Inline Python (fallback if main.py missing)
+═══════════════════════════════════════ -->
+<script type="py">
+import js
+import io
+import sys
+
+# Hide loading overlay once PyScript is ready
+def hide_loader():
+    el = js.document.getElementById('py-loading')
+    el.classList.add('hidden')
+
+# Download font bytes via fetch (browser)
+async def fetch_font():
+    url = "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Regular.ttf"
+    response = await js.fetch(url)
+    buf = await response.arrayBuffer()
+    arr = js.Uint8Array.new(buf)
+    return bytes(arr.to_py())
+
+_font_bytes = None
+
+async def ensure_font_bytes():
+    global _font_bytes
+    if _font_bytes is not None:
+        return _font_bytes
+    try:
+        _font_bytes = await fetch_font()
+    except Exception as e:
+        raise RuntimeError(f"Could not load Devanagari font: {e}")
+    return _font_bytes
+
+async def process_from_js():
+    try:
+        from pypdf import PdfReader, PdfWriter
+        from reportlab.pdfgen import canvas as rl_canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+
+        pdf_bytes   = bytes(js.window._pdfInput.to_py())
+        hindi_text  = str(js.window._hindiText)
+        font_size   = int(js.window._fontSize)
+        position    = str(js.window._position)
+        color_list  = js.window._colorRGB.to_py()
+        color_rgb   = tuple(color_list)
+
+        # Load font
+        font_bytes = await ensure_font_bytes()
+
+        # Register font from bytes
+        import tempfile, os
+        font_tmp = "/tmp/NotoSansDevanagari-Regular.ttf"
+        with open(font_tmp, "wb") as f:
+            f.write(font_bytes)
+
+        try:
+            pdfmetrics.registerFont(TTFont("NotoSansDevanagari", font_tmp))
+        except Exception:
+            pass  # already registered
+
+        # Read PDF
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        page = reader.pages[0]
+        pw = float(page.mediabox.width)
+        ph = float(page.mediabox.height)
+
+        # Estimate text width
+        est_w = len(hindi_text) * font_size * 0.65
+        margin = 50
+
+        pos_map = {
+            "1": (margin, ph - margin),
+            "2": (pw/2 - est_w/2, ph - margin),
+            "3": (pw - est_w - margin, ph - margin),
+            "4": (pw/2 - est_w/2, ph/2),
+            "5": (margin, margin + font_size),
+        }
+        x, y = pos_map.get(position, (margin, ph - margin))
+
+        # Build overlay
+        packet = io.BytesIO()
+        c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
+        c.setFont("NotoSansDevanagari", font_size)
+        c.setFillColorRGB(*color_rgb)
+        c.drawString(x, y, hindi_text)
+        c.save()
+        packet.seek(0)
+
+        # Merge
+        overlay_reader = PdfReader(packet)
+        overlay_page = overlay_reader.pages[0]
+        page.merge_page(overlay_page)
+
+        writer = PdfWriter()
+        writer.add_page(page)
+        for i in range(1, len(reader.pages)):
+            writer.add_page(reader.pages[i])
+
+        out = io.BytesIO()
+        writer.write(out)
+        result = list(out.getvalue())
+
+        js.onPythonDone(result)
+
+    except Exception as e:
+        js.onPythonError(str(e))
+
+hide_loader()
+</script>
+
+</body>
+</html>
