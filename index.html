@@ -574,7 +574,7 @@ async function processPDF() {
   const colorMap   = { blue:[0.1,0.1,0.8], black:[0,0,0], red:[0.8,0.1,0.1], green:[0.07,0.53,0.03], saffron:[1,0.42,0] };
   const colorRGB   = colorMap[selectedColor] || colorMap.blue;
 
-  setStatus('loading', '<span class="spin"></span> &nbsp;Processing PDF…');
+  setStatus('loading', '<span class="spin"></span> &nbsp;Rendering text & processing PDF…');
   document.getElementById('process-btn').disabled = true;
   document.getElementById('download-btn').style.display = 'none';
 
@@ -608,111 +608,56 @@ function onPythonError(msg) {
   setStatus('error', '❌ ' + msg);
   document.getElementById('process-btn').disabled = false;
 }
+
+// Render Hindi text using browser's own shaping engine → PNG data URL
+// This correctly handles ALL conjuncts (श्र, क्ष, त्र etc.)
+function renderHindiToImage(text, pxSize, r, g, b) {
+  const scale = 3; // render at 3x for crispness, will be scaled down in PDF
+  const fontSize = pxSize; // already scaled by caller
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // Use Noto Serif Devanagari — loaded via Google Fonts at page load
+  const fontStr = `${fontSize}px "Noto Serif Devanagari", serif`;
+  ctx.font = fontStr;
+  const measured = ctx.measureText(text);
+
+  const padX = fontSize * 0.3;
+  const padY = fontSize * 0.5;
+  const w = Math.ceil(measured.width) + padX * 2;
+  const h = Math.ceil(fontSize * 1.8) + padY * 2; // enough for ascenders/descenders
+
+  canvas.width  = w;
+  canvas.height = h;
+
+  // Transparent background
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.font = fontStr;
+  ctx.fillStyle = `rgb(${Math.round(r*255)},${Math.round(g*255)},${Math.round(b*255)})`;
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(text, padX, padY + fontSize);
+
+  window._renderedW = w;
+  window._renderedH = h;
+
+  return canvas.toDataURL('image/png');
+}
 </script>
 
 <!-- Python runs entirely inline via PyScript -->
-<script type="py" config='{"packages":["pypdf","reportlab","uharfbuzz"]}'>
+<script type="py" config='{"packages":["pypdf","reportlab"]}'>
 import js
 import io
+import base64
+import asyncio
 from pyodide.ffi import create_proxy
-
-_font_bytes = None
-FONT_TMP = "/tmp/Shobhika-Regular.otf"
-FONT_KEY  = "ShobhikaDevanagari"
-
-async def fetch_font():
-    # Shobhika — purpose-built for Devanagari conjuncts, OTF with full GSUB
-    url = "https://cdn.jsdelivr.net/gh/Sandhi-IITBombay/Shobhika@master/Fonts/Shobhika-Regular.otf"
-    response = await js.fetch(url)
-    if not response.ok:
-        raise RuntimeError(f"Font fetch failed: {response.status}")
-    buf = await response.arrayBuffer()
-    return bytes(js.Uint8Array.new(buf).to_py())
-
-async def ensure_font():
-    global _font_bytes
-    if _font_bytes is None:
-        _font_bytes = await fetch_font()
-    with open(FONT_TMP, "wb") as f:
-        f.write(_font_bytes)
-    return FONT_TMP
-
-def shape_devanagari(text, font_path, font_size):
-    """
-    Use HarfBuzz via uharfbuzz to shape Devanagari text into positioned glyphs.
-    Returns list of (glyph_id, x_offset_pt, y_offset_pt, x_advance_pt).
-    """
-    import uharfbuzz as hb
-
-    with open(font_path, "rb") as f:
-        font_data = f.read()
-
-    blob = hb.Blob(font_data)
-    face = hb.Face(blob)
-    font = hb.Font(face)
-
-    upem = face.upem
-    scale = font_size / upem
-
-    buf = hb.Buffer()
-    buf.add_str(text)
-    buf.guess_segment_properties()
-
-    # Enable Devanagari shaping features
-    features = {
-        "kern": True, "liga": True, "calt": True,
-        "akhn": True, "rphf": True, "blwf": True,
-        "half": True, "pstf": True, "vatu": True,
-        "pres": True, "abvs": True, "blws": True,
-        "psts": True, "haln": True, "clig": True,
-    }
-    hb.shape(font, buf, features)
-
-    infos    = buf.glyph_infos
-    positions = buf.glyph_positions
-
-    glyphs = []
-    for info, pos in zip(infos, positions):
-        glyphs.append((
-            info.codepoint,                  # glyph id
-            pos.x_offset  * scale,
-            pos.y_offset  * scale,
-            pos.x_advance * scale,
-        ))
-    return glyphs
-
-def draw_shaped_text(canvas_obj, text, x, y, font_path, font_size, color_rgb):
-    """Draw HarfBuzz-shaped Devanagari glyphs onto a ReportLab canvas."""
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.lib.colors import Color
-
-    try:
-        pdfmetrics.registerFont(TTFont(FONT_KEY, font_path))
-    except Exception:
-        pass
-
-    try:
-        glyphs = shape_devanagari(text, font_path, font_size)
-        canvas_obj.setFillColor(Color(*color_rgb))
-        canvas_obj.setFont(FONT_KEY, font_size)
-        cx = x
-        for gid, xoff, yoff, xadv in glyphs:
-            # Map glyph id → unicode char for ReportLab (best-effort)
-            canvas_obj.drawString(cx + xoff, y + yoff, chr(gid) if gid < 0x10FFFF else "")
-            cx += xadv
-    except Exception:
-        # Fallback: plain drawString (conjuncts may break but won't crash)
-        canvas_obj.setFillColorRGB(*color_rgb)
-        canvas_obj.setFont(FONT_KEY, font_size)
-        canvas_obj.drawString(x, y, text)
 
 async def run(_event=None):
     try:
         from pypdf import PdfReader, PdfWriter
         from reportlab.pdfgen import canvas as rl_canvas
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
 
         pdf_bytes  = bytes(js.window._pdfInput.to_py())
         hindi_text = str(js.window._hindiText)
@@ -720,35 +665,51 @@ async def run(_event=None):
         position   = str(js.window._position)
         color_rgb  = tuple(js.window._colorRGB.to_py())
 
-        font_path = await ensure_font()
-        try:
-            pdfmetrics.registerFont(TTFont(FONT_KEY, font_path))
-        except Exception:
-            pass  # already registered
+        # ── Step 1: Ask JS to render text via browser Canvas (perfect shaping) ──
+        # Scale 3x for crisp rendering
+        scale = 3
+        px_size = font_size * scale
+        img_data_url = str(js.renderHindiToImage(hindi_text, px_size, color_rgb[0], color_rgb[1], color_rgb[2]))
 
+        # img_data_url = "data:image/png;base64,..."
+        b64 = img_data_url.split(",")[1]
+        img_bytes = base64.b64decode(b64)
+
+        # Get rendered image dimensions from JS
+        img_w_px = int(js.window._renderedW)  # px at 3x scale
+        img_h_px = int(js.window._renderedH)
+
+        # Convert px → PDF points (72pt = 1inch, screen ~96dpi, but we used scale factor)
+        # We treat the canvas as 96dpi: pt = px * 72/96 / scale
+        img_w_pt = img_w_px * 72 / 96 / scale
+        img_h_pt = img_h_px * 72 / 96 / scale
+
+        # ── Step 2: Read PDF and compute position ──
         reader = PdfReader(io.BytesIO(pdf_bytes))
         page   = reader.pages[0]
         pw     = float(page.mediabox.width)
         ph     = float(page.mediabox.height)
 
         margin = 50
-        est_w  = len(hindi_text) * font_size * 0.65
         pos_map = {
-            "1": (margin,              ph - margin),
-            "2": (pw/2 - est_w/2,     ph - margin),
-            "3": (pw - est_w - margin, ph - margin),
-            "4": (pw/2 - est_w/2,     ph/2),
-            "5": (margin,              margin + font_size),
+            "1": (margin,                    ph - margin - img_h_pt),
+            "2": (pw/2 - img_w_pt/2,         ph - margin - img_h_pt),
+            "3": (pw - img_w_pt - margin,    ph - margin - img_h_pt),
+            "4": (pw/2 - img_w_pt/2,         ph/2 - img_h_pt/2),
+            "5": (margin,                    margin),
         }
         if position == "6":
             x = float(js.window._customX)
             y = float(js.window._customY)
         else:
-            x, y = pos_map.get(position, (margin, ph - margin))
+            x, y = pos_map.get(position, (margin, ph - margin - img_h_pt))
 
+        # ── Step 3: Draw PNG image onto overlay ──
         packet = io.BytesIO()
         c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
-        draw_shaped_text(c, hindi_text, x, y, font_path, font_size, color_rgb)
+        img_io = io.BytesIO(img_bytes)
+        from reportlab.lib.utils import ImageReader
+        c.drawImage(ImageReader(img_io), x, y, width=img_w_pt, height=img_h_pt, mask='auto')
         c.save()
         packet.seek(0)
 
@@ -768,14 +729,11 @@ async def run(_event=None):
         import traceback
         js.onPythonError(traceback.format_exc())
 
-# Listen for JS trigger event — must wrap in ensure_future to await the coroutine
 import asyncio
 def on_run_event(e):
     asyncio.ensure_future(run(e))
 
 js.window.addEventListener("run-python-pdf", create_proxy(on_run_event))
-
-# PyScript ready — hide loader
 js.document.getElementById("py-loading").classList.add("hidden")
 </script>
 
