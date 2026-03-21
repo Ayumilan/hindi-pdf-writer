@@ -354,13 +354,40 @@
       </div>
       <div class="field">
         <label>Position on page</label>
-        <select id="position">
+        <select id="position" onchange="toggleCustomPos(this.value)">
           <option value="1">Top-Left</option>
           <option value="2">Top-Center</option>
           <option value="3">Top-Right</option>
           <option value="4">Center</option>
           <option value="5">Bottom-Left</option>
+          <option value="6">Custom…</option>
         </select>
+      </div>
+    </div>
+
+    <!-- Custom position — hidden unless Custom is chosen -->
+    <div id="custom-pos" style="display:none;margin-bottom:20px;">
+      <div style="background:var(--paper);border:1.5px solid var(--border);border-radius:12px;padding:16px 18px;">
+        <div style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--saffron);margin-bottom:6px;">Custom position (in points)</div>
+        <div style="font-size:0.75rem;color:var(--ash);margin-bottom:14px;">1 inch = 72 pt &nbsp;·&nbsp; A4 = 595 × 842 pt &nbsp;·&nbsp; Letter = 612 × 792 pt &nbsp;·&nbsp; origin (0,0) is bottom-left</div>
+        <div class="grid2" style="gap:12px;">
+          <div>
+            <label style="margin-bottom:4px;">X — from left edge (pt)</label>
+            <input type="number" id="custom-x" min="0" max="2000" value="50" oninput="updateCustomPos()" placeholder="e.g. 50"/>
+          </div>
+          <div>
+            <label style="margin-bottom:4px;">Y — from bottom edge (pt)</label>
+            <input type="number" id="custom-y" min="0" max="2000" value="750" oninput="updateCustomPos()" placeholder="e.g. 750"/>
+          </div>
+        </div>
+        <!-- Mini page preview -->
+        <div style="position:relative;width:100%;padding-bottom:65%;background:#fff;border:1.5px solid var(--border);border-radius:8px;margin-top:14px;overflow:hidden;cursor:crosshair;" id="pos-preview" onclick="setPosByClick(event)" title="Click to place">
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
+            <span style="font-size:0.68rem;color:#ddd;pointer-events:none;user-select:none;">click to place ↗</span>
+          </div>
+          <div id="pos-dot" style="position:absolute;width:12px;height:12px;background:var(--saffron);border-radius:50%;transform:translate(-50%,50%);pointer-events:none;box-shadow:0 2px 6px rgba(255,107,0,0.5);transition:left 0.08s,bottom 0.08s;"></div>
+          <div id="pos-label" style="position:absolute;font-size:0.6rem;color:var(--saffron);white-space:nowrap;pointer-events:none;font-family:'DM Mono',monospace;transform:translate(-50%,calc(50% + 14px));transition:left 0.08s,bottom 0.08s;"></div>
+        </div>
       </div>
     </div>
 
@@ -433,7 +460,37 @@ function previewHindi(val) {
   prev.textContent = mapped || val;
 }
 
-function selectColor(el) {
+function toggleCustomPos(val) {
+  document.getElementById('custom-pos').style.display = val === '6' ? 'block' : 'none';
+}
+
+function updateCustomPos() {
+  const x = parseInt(document.getElementById('custom-x').value) || 0;
+  const y = parseInt(document.getElementById('custom-y').value) || 0;
+  // Preview assumes A4 (595×842) for dot placement — good enough for preview
+  const pageW = 595, pageH = 842;
+  const xPct = Math.min(Math.max(x / pageW * 100, 0), 100);
+  const yPct = Math.min(Math.max(y / pageH * 100, 0), 100);
+  document.getElementById('pos-dot').style.left   = xPct + '%';
+  document.getElementById('pos-dot').style.bottom = yPct + '%';
+  document.getElementById('pos-label').style.left   = xPct + '%';
+  document.getElementById('pos-label').style.bottom = yPct + '%';
+  document.getElementById('pos-label').textContent  = `(${x}, ${y})`;
+}
+
+function setPosByClick(e) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const xPct = (e.clientX - rect.left) / rect.width;
+  const yPct = 1 - (e.clientY - rect.top) / rect.height;
+  // Convert back to points (preview assumes A4)
+  const x = Math.round(xPct * 595);
+  const y = Math.round(yPct * 842);
+  document.getElementById('custom-x').value = x;
+  document.getElementById('custom-y').value = y;
+  updateCustomPos();
+}
+
+
   document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
   el.classList.add('active');
   selectedColor = el.dataset.color;
@@ -519,6 +576,9 @@ async function processPDF() {
   window._fontSize    = fontSize;
   window._position    = position;
   window._colorRGB    = colorRGB;
+  // Custom position in PDF points (used only when position === '6')
+  window._customX = parseInt(document.getElementById('custom-x').value) || 50;
+  window._customY = parseInt(document.getElementById('custom-y').value) || 750;
 
   // Small delay to let DOM update
   await new Promise(r => setTimeout(r, 50));
@@ -592,13 +652,17 @@ async def run(_event=None):
         margin = 50
         est_w  = len(hindi_text) * font_size * 0.65
         pos_map = {
-            "1": (margin,            ph - margin),
-            "2": (pw/2 - est_w/2,   ph - margin),
+            "1": (margin,              ph - margin),
+            "2": (pw/2 - est_w/2,     ph - margin),
             "3": (pw - est_w - margin, ph - margin),
-            "4": (pw/2 - est_w/2,   ph/2),
-            "5": (margin,            margin + font_size),
+            "4": (pw/2 - est_w/2,     ph/2),
+            "5": (margin,              margin + font_size),
         }
-        x, y = pos_map.get(position, (margin, ph - margin))
+        if position == "6":
+            x = float(js.window._customX)
+            y = float(js.window._customY)
+        else:
+            x, y = pos_map.get(position, (margin, ph - margin))
 
         packet = io.BytesIO()
         c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
