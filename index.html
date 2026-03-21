@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Hindi PDF Writer · हिंदी PDF लेखक</title>
-<link href="https://fonts.googleapis.com/css2?family=Tiro+Devanagari+Hindi:ital@0;1&family=DM+Mono:wght@400;500&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Devanagari:wght@400;600;700&family=DM+Mono:wght@400;500&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet"/>
 
 <!-- PyScript -->
 <link rel="stylesheet" href="https://pyscript.net/releases/2024.11.1/core.css"/>
@@ -97,7 +97,7 @@
   }
 
   .sub {
-    font-family: 'Tiro Devanagari Hindi', serif;
+    font-family: 'Noto Serif Devanagari', serif;
     font-size: 1.1rem;
     color: var(--ash);
     margin-top: 8px;
@@ -188,7 +188,7 @@
 
   .preview-hindi {
     margin-top: 8px;
-    font-family: 'Tiro Devanagari Hindi', serif;
+    font-family: 'Noto Serif Devanagari', serif;
     font-size: 1.5rem;
     color: var(--ink);
     min-height: 2rem;
@@ -611,8 +611,8 @@ from pyodide.ffi import create_proxy
 _font_bytes = None
 
 async def fetch_font():
-    # Use jsDelivr CDN — reliable CORS headers, works from browser
-    url = "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Regular.ttf"
+    # Noto Serif Devanagari — better conjunct rendering (श्र, क्ष, etc.)
+    url = "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSerifDevanagari/NotoSerifDevanagari-Regular.ttf"
     response = await js.fetch(url)
     buf = await response.arrayBuffer()
     return bytes(js.Uint8Array.new(buf).to_py())
@@ -621,7 +621,7 @@ async def ensure_font():
     global _font_bytes
     if _font_bytes is None:
         _font_bytes = await fetch_font()
-    font_tmp = "/tmp/NotoSansDevanagari-Regular.ttf"
+    font_tmp = "/tmp/NotoSerifDevanagari-Regular.ttf"
     with open(font_tmp, "wb") as f:
         f.write(_font_bytes)
     return font_tmp
@@ -641,7 +641,7 @@ async def run(_event=None):
 
         font_path = await ensure_font()
         try:
-            pdfmetrics.registerFont(TTFont("NotoSansDevanagari", font_path))
+            pdfmetrics.registerFont(TTFont("NotoSerifDevanagari", font_path))
         except Exception:
             pass  # already registered
 
@@ -667,7 +667,7 @@ async def run(_event=None):
 
         packet = io.BytesIO()
         c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
-        c.setFont("NotoSansDevanagari", font_size)
+        c.setFont("NotoSerifDevanagari", font_size)
         c.setFillColorRGB(*color_rgb)
         c.drawString(x, y, hindi_text)
         c.save()
