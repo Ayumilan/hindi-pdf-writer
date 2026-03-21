@@ -624,8 +624,12 @@ async def run(_event=None):
         import traceback
         js.onPythonError(traceback.format_exc())
 
-# Listen for JS trigger event
-js.window.addEventListener("run-python-pdf", create_proxy(lambda e: run(e)))
+# Listen for JS trigger event — must wrap in ensure_future to await the coroutine
+import asyncio
+def on_run_event(e):
+    asyncio.ensure_future(run(e))
+
+js.window.addEventListener("run-python-pdf", create_proxy(on_run_event))
 
 # PyScript ready — hide loader
 js.document.getElementById("py-loading").classList.add("hidden")
