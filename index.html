@@ -491,6 +491,7 @@ function setPosByClick(e) {
 }
 
 
+function selectColor(el) {
   document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
   el.classList.add('active');
   selectedColor = el.dataset.color;
