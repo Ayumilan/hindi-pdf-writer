@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Hindi PDF Writer · हिंदी PDF लेखक</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Devanagari:wght@400;600;700&family=DM+Mono:wght@400;500&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet"/>
+<!-- Shobhika via jsDelivr for UI Hindi preview -->
+<style>
+@font-face {
+  font-family: 'Shobhika';
+  src: url('https://cdn.jsdelivr.net/gh/Sandhi-IITBombay/Shobhika@master/Fonts/Shobhika-Regular.otf') format('opentype');
+  font-display: swap;
+}
+</style>
 
 <!-- PyScript -->
 <link rel="stylesheet" href="https://pyscript.net/releases/2024.11.1/core.css"/>
@@ -97,7 +105,7 @@
   }
 
   .sub {
-    font-family: 'Noto Serif Devanagari', serif;
+    font-family: 'Shobhika', 'Noto Serif Devanagari', serif;
     font-size: 1.1rem;
     color: var(--ash);
     margin-top: 8px;
@@ -188,7 +196,7 @@
 
   .preview-hindi {
     margin-top: 8px;
-    font-family: 'Noto Serif Devanagari', serif;
+    font-family: 'Shobhika', 'Noto Serif Devanagari', serif;
     font-size: 1.5rem;
     color: var(--ink);
     min-height: 2rem;
@@ -603,17 +611,21 @@ function onPythonError(msg) {
 </script>
 
 <!-- Python runs entirely inline via PyScript -->
-<script type="py" config='{"packages":["pypdf","reportlab"]}'>
+<script type="py" config='{"packages":["pypdf","reportlab","uharfbuzz"]}'>
 import js
 import io
 from pyodide.ffi import create_proxy
 
 _font_bytes = None
+FONT_TMP = "/tmp/Shobhika-Regular.otf"
+FONT_KEY  = "ShobhikaDevanagari"
 
 async def fetch_font():
-    # Noto Serif Devanagari — better conjunct rendering (श्र, क्ष, etc.)
-    url = "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSerifDevanagari/NotoSerifDevanagari-Regular.ttf"
+    # Shobhika — purpose-built for Devanagari conjuncts, OTF with full GSUB
+    url = "https://cdn.jsdelivr.net/gh/Sandhi-IITBombay/Shobhika@master/Fonts/Shobhika-Regular.otf"
     response = await js.fetch(url)
+    if not response.ok:
+        raise RuntimeError(f"Font fetch failed: {response.status}")
     buf = await response.arrayBuffer()
     return bytes(js.Uint8Array.new(buf).to_py())
 
@@ -621,10 +633,79 @@ async def ensure_font():
     global _font_bytes
     if _font_bytes is None:
         _font_bytes = await fetch_font()
-    font_tmp = "/tmp/NotoSerifDevanagari-Regular.ttf"
-    with open(font_tmp, "wb") as f:
+    with open(FONT_TMP, "wb") as f:
         f.write(_font_bytes)
-    return font_tmp
+    return FONT_TMP
+
+def shape_devanagari(text, font_path, font_size):
+    """
+    Use HarfBuzz via uharfbuzz to shape Devanagari text into positioned glyphs.
+    Returns list of (glyph_id, x_offset_pt, y_offset_pt, x_advance_pt).
+    """
+    import uharfbuzz as hb
+
+    with open(font_path, "rb") as f:
+        font_data = f.read()
+
+    blob = hb.Blob(font_data)
+    face = hb.Face(blob)
+    font = hb.Font(face)
+
+    upem = face.upem
+    scale = font_size / upem
+
+    buf = hb.Buffer()
+    buf.add_str(text)
+    buf.guess_segment_properties()
+
+    # Enable Devanagari shaping features
+    features = {
+        "kern": True, "liga": True, "calt": True,
+        "akhn": True, "rphf": True, "blwf": True,
+        "half": True, "pstf": True, "vatu": True,
+        "pres": True, "abvs": True, "blws": True,
+        "psts": True, "haln": True, "clig": True,
+    }
+    hb.shape(font, buf, features)
+
+    infos    = buf.glyph_infos
+    positions = buf.glyph_positions
+
+    glyphs = []
+    for info, pos in zip(infos, positions):
+        glyphs.append((
+            info.codepoint,                  # glyph id
+            pos.x_offset  * scale,
+            pos.y_offset  * scale,
+            pos.x_advance * scale,
+        ))
+    return glyphs
+
+def draw_shaped_text(canvas_obj, text, x, y, font_path, font_size, color_rgb):
+    """Draw HarfBuzz-shaped Devanagari glyphs onto a ReportLab canvas."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.lib.colors import Color
+
+    try:
+        pdfmetrics.registerFont(TTFont(FONT_KEY, font_path))
+    except Exception:
+        pass
+
+    try:
+        glyphs = shape_devanagari(text, font_path, font_size)
+        canvas_obj.setFillColor(Color(*color_rgb))
+        canvas_obj.setFont(FONT_KEY, font_size)
+        cx = x
+        for gid, xoff, yoff, xadv in glyphs:
+            # Map glyph id → unicode char for ReportLab (best-effort)
+            canvas_obj.drawString(cx + xoff, y + yoff, chr(gid) if gid < 0x10FFFF else "")
+            cx += xadv
+    except Exception:
+        # Fallback: plain drawString (conjuncts may break but won't crash)
+        canvas_obj.setFillColorRGB(*color_rgb)
+        canvas_obj.setFont(FONT_KEY, font_size)
+        canvas_obj.drawString(x, y, text)
 
 async def run(_event=None):
     try:
@@ -641,7 +722,7 @@ async def run(_event=None):
 
         font_path = await ensure_font()
         try:
-            pdfmetrics.registerFont(TTFont("NotoSerifDevanagari", font_path))
+            pdfmetrics.registerFont(TTFont(FONT_KEY, font_path))
         except Exception:
             pass  # already registered
 
@@ -667,9 +748,7 @@ async def run(_event=None):
 
         packet = io.BytesIO()
         c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
-        c.setFont("NotoSerifDevanagari", font_size)
-        c.setFillColorRGB(*color_rgb)
-        c.drawString(x, y, hindi_text)
+        draw_shaped_text(c, hindi_text, x, y, font_path, font_size, color_rgb)
         c.save()
         packet.seek(0)
 
